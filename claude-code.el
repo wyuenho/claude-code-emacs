@@ -77,11 +77,10 @@
 (require 'claude-code-mcp)
 (require 'claude-code-mcp-events)
 
-;; IDE protocol integration (only when websocket is available)
-(when (featurep 'websocket)
-  (require 'claude-code-ide-server)
-  (require 'claude-code-ide-tools)
-  (require 'claude-code-ide-events))
+;; IDE protocol integration
+(require 'claude-code-ide-server)
+(require 'claude-code-ide-tools)
+(require 'claude-code-ide-events)
 
 (provide 'claude-code)
 ;;; claude-code.el ends here

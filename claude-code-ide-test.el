@@ -135,31 +135,188 @@
 
 ;;; Authentication Tests
 
-(ert-deftest test-ide-auth-header-validation-success ()
-  "Test successful auth header validation."
+(ert-deftest test-ide-server-filter-auth-valid ()
+  "Test server filter accepts valid auth token."
   (let* ((auth-token "550e8400-e29b-41d4-a716-446655440000")
-         (headers '(("x-claude-code-ide-authorization" . "550e8400-e29b-41d4-a716-446655440000")
-                    ("host" . "localhost"))))
-    (should (claude-code-ide-validate-auth-header headers auth-token))))
+         (http-request (concat "GET / HTTP/1.1\r\n"
+                              "Host: localhost\r\n"
+                              "Upgrade: websocket\r\n"
+                              "Connection: Upgrade\r\n"
+                              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                              "Sec-WebSocket-Version: 13\r\n"
+                              "x-claude-code-ide-authorization: " auth-token "\r\n"
+                              "\r\n"))
+         (process-output nil)
+         (connection-closed nil))
+    (cl-letf* (((symbol-function 'websocket-verify-client-headers)
+                (lambda (_output)
+                  ;; Return valid header info
+                  (list :key "dGhlIHNhbXBsZSBub25jZQ=="
+                        :protocols nil
+                        :extensions nil)))
+               ((symbol-function 'websocket-calculate-accept)
+                (lambda (_key) "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="))
+               ((symbol-function 'websocket-get-server-response)
+                (lambda (_ws _protocols _extensions)
+                  "HTTP/1.1 101 Switching Protocols\r\n\r\n"))
+               ((symbol-function 'websocket-try-callback)
+                (lambda (_callback _type _ws) nil))
+               ((symbol-function 'process-send-string)
+                (lambda (_process output)
+                  (setq process-output output)))
+               ((symbol-function 'websocket-close)
+                (lambda (_ws)
+                  (setq connection-closed t))))
+      ;; Create mock websocket and process
+      (let* ((ws (websocket-inner-create
+                  :server-conn nil
+                  :conn nil
+                  :url nil
+                  :server-p t
+                  :on-open 'identity
+                  :on-message (lambda (_ws _frame))
+                  :on-close 'identity
+                  :on-error 'websocket-default-error-handler))
+             (process (make-hash-table)))
+        ;; Mock process-get to return websocket and auth token
+        (cl-letf (((symbol-function 'process-get)
+                   (lambda (_process key)
+                     (cond ((eq key :websocket) ws)
+                           ((eq key :claude-code-auth-token) auth-token)
+                           (t nil))))
+                  ((symbol-function 'websocket-server-conn)
+                   (lambda (_ws) process)))
+          ;; Call the filter
+          (claude-code-ide-server-filter process http-request)
 
-(ert-deftest test-ide-auth-header-validation-failure ()
-  "Test auth header validation fails with wrong token."
-  (let* ((auth-token "550e8400-e29b-41d4-a716-446655440000")
-         (headers '(("x-claude-code-ide-authorization" . "wrong-token-here")
-                    ("host" . "localhost"))))
-    (should-not (claude-code-ide-validate-auth-header headers auth-token))))
+          ;; Verify connection was accepted (not closed, got 101 response)
+          (should-not connection-closed)
+          (should (string-match-p "101 Switching Protocols" process-output)))))))
 
-(ert-deftest test-ide-auth-header-validation-missing ()
-  "Test auth header validation fails when header is missing."
+(ert-deftest test-ide-server-filter-auth-invalid ()
+  "Test server filter rejects invalid auth token."
   (let* ((auth-token "550e8400-e29b-41d4-a716-446655440000")
-         (headers '(("host" . "localhost"))))
-    (should-not (claude-code-ide-validate-auth-header headers auth-token))))
+         (http-request (concat "GET / HTTP/1.1\r\n"
+                              "Host: localhost\r\n"
+                              "Upgrade: websocket\r\n"
+                              "x-claude-code-ide-authorization: wrong-token\r\n"
+                              "\r\n"))
+         (process-output nil)
+         (connection-closed nil))
+    (cl-letf* (((symbol-function 'process-send-string)
+                (lambda (_process output)
+                  (setq process-output output)))
+               ((symbol-function 'websocket-close)
+                (lambda (_ws)
+                  (setq connection-closed t))))
+      ;; Create mock websocket and process
+      (let* ((ws (websocket-inner-create
+                  :server-conn nil
+                  :conn nil
+                  :url nil
+                  :server-p t
+                  :on-open 'identity
+                  :on-message (lambda (_ws _frame))
+                  :on-close 'identity
+                  :on-error 'websocket-default-error-handler))
+             (process (make-hash-table)))
+        ;; Mock process-get to return websocket and auth token
+        (cl-letf (((symbol-function 'process-get)
+                   (lambda (_process key)
+                     (cond ((eq key :websocket) ws)
+                           ((eq key :claude-code-auth-token) auth-token)
+                           (t nil))))
+                  ((symbol-function 'websocket-server-conn)
+                   (lambda (_ws) process)))
+          ;; Call the filter
+          (claude-code-ide-server-filter process http-request)
 
-(ert-deftest test-ide-auth-header-case-sensitive ()
-  "Test auth header validation is case-sensitive for token."
+          ;; Verify connection was rejected (closed, got 401 response)
+          (should connection-closed)
+          (should (string-match-p "401 Unauthorized" process-output)))))))
+
+(ert-deftest test-ide-server-filter-auth-missing ()
+  "Test server filter rejects missing auth header."
   (let* ((auth-token "550e8400-e29b-41d4-a716-446655440000")
-         (headers '(("x-claude-code-ide-authorization" . "550E8400-E29B-41D4-A716-446655440000"))))
-    (should-not (claude-code-ide-validate-auth-header headers auth-token))))
+         (http-request (concat "GET / HTTP/1.1\r\n"
+                              "Host: localhost\r\n"
+                              "Upgrade: websocket\r\n"
+                              "\r\n"))
+         (process-output nil)
+         (connection-closed nil))
+    (cl-letf* (((symbol-function 'process-send-string)
+                (lambda (_process output)
+                  (setq process-output output)))
+               ((symbol-function 'websocket-close)
+                (lambda (_ws)
+                  (setq connection-closed t))))
+      ;; Create mock websocket and process
+      (let* ((ws (websocket-inner-create
+                  :server-conn nil
+                  :conn nil
+                  :url nil
+                  :server-p t
+                  :on-open 'identity
+                  :on-message (lambda (_ws _frame))
+                  :on-close 'identity
+                  :on-error 'websocket-default-error-handler))
+             (process (make-hash-table)))
+        ;; Mock process-get to return websocket and auth token
+        (cl-letf (((symbol-function 'process-get)
+                   (lambda (_process key)
+                     (cond ((eq key :websocket) ws)
+                           ((eq key :claude-code-auth-token) auth-token)
+                           (t nil))))
+                  ((symbol-function 'websocket-server-conn)
+                   (lambda (_ws) process)))
+          ;; Call the filter
+          (claude-code-ide-server-filter process http-request)
+
+          ;; Verify connection was rejected (closed, got 401 response)
+          (should connection-closed)
+          (should (string-match-p "401 Unauthorized" process-output)))))))
+
+(ert-deftest test-ide-server-filter-auth-case-sensitive ()
+  "Test auth token matching is case-sensitive."
+  (let* ((auth-token "550e8400-e29b-41d4-a716-446655440000")
+         (http-request (concat "GET / HTTP/1.1\r\n"
+                              "Host: localhost\r\n"
+                              "Upgrade: websocket\r\n"
+                              "x-claude-code-ide-authorization: 550E8400-E29B-41D4-A716-446655440000\r\n"
+                              "\r\n"))
+         (process-output nil)
+         (connection-closed nil))
+    (cl-letf* (((symbol-function 'process-send-string)
+                (lambda (_process output)
+                  (setq process-output output)))
+               ((symbol-function 'websocket-close)
+                (lambda (_ws)
+                  (setq connection-closed t))))
+      ;; Create mock websocket and process
+      (let* ((ws (websocket-inner-create
+                  :server-conn nil
+                  :conn nil
+                  :url nil
+                  :server-p t
+                  :on-open 'identity
+                  :on-message (lambda (_ws _frame))
+                  :on-close 'identity
+                  :on-error 'websocket-default-error-handler))
+             (process (make-hash-table)))
+        ;; Mock process-get to return websocket and auth token
+        (cl-letf (((symbol-function 'process-get)
+                   (lambda (_process key)
+                     (cond ((eq key :websocket) ws)
+                           ((eq key :claude-code-auth-token) auth-token)
+                           (t nil))))
+                  ((symbol-function 'websocket-server-conn)
+                   (lambda (_ws) process)))
+          ;; Call the filter
+          (claude-code-ide-server-filter process http-request)
+
+          ;; Verify connection was rejected due to case mismatch
+          (should connection-closed)
+          (should (string-match-p "401 Unauthorized" process-output)))))))
 
 ;;; Tool Dispatching Tests
 

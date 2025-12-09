@@ -38,7 +38,7 @@
 (declare-function websocket-server "websocket" (port &rest plist))
 (declare-function websocket-send-text "websocket" (websocket text))
 (declare-function websocket-close "websocket" (websocket))
-(declare-function websocket-server-conn-headers "websocket" (websocket))
+(declare-function websocket-verify-client-headers "websocket" (output))
 (declare-function websocket-frame-text "websocket" (frame))
 
 ;; Forward declarations for tool handlers
@@ -57,6 +57,81 @@ Each value is an alist with keys:
 
 ;;; Helper Functions
 
+;; Additional websocket function declarations
+(declare-function websocket-server-accept "websocket" (server client message))
+(declare-function websocket-ready-state "websocket" (websocket))
+(declare-function websocket-inflight-input "websocket" (websocket))
+(declare-function websocket-verify-client-headers "websocket" (output))
+(declare-function websocket-calculate-accept "websocket" (key))
+(declare-function websocket-get-server-response "websocket" (websocket protocols extensions))
+(declare-function websocket-process-input-on-open-ws "websocket" (websocket text))
+(declare-function websocket-try-callback "websocket" (websocket-callback callback-type websocket &rest rest))
+(declare-function websocket-accept-string "websocket" (websocket))
+(declare-function websocket-origin "websocket" (websocket))
+(declare-function websocket-server-conn "websocket" (websocket))
+
+(defvar websocket-server-websockets)
+
+(defun claude-code-ide-server-filter (process output)
+  "Custom filter for IDE WebSocket server that validates auth token.
+Largely copied from `websocket-server-filter', but adds auth validation
+before processing headers."
+  (let* ((ws (process-get process :websocket))
+         (text (concat (websocket-inflight-input ws) output)))
+    (setf (websocket-inflight-input ws) nil)
+    (cond ((eq (websocket-ready-state ws) 'connecting)
+           ;; check for connection string
+           (let ((end-of-header-pos
+                  (let ((pos (string-match "\r\n\r\n" text)))
+                    (when pos (+ 4 pos)))))
+             (if end-of-header-pos
+                 (progn
+                   ;; CUSTOM: Extract and validate auth token BEFORE header verification
+                   (let ((case-fold-search t)
+                         ;; Get auth token from server process (not client process)
+                         (server (websocket-server-conn ws))
+                         (expected-token (process-get (websocket-server-conn ws) :claude-code-auth-token))
+                         (auth-valid nil))
+                     ;; Check if auth header is present and matches
+                     (if (string-match "^x-claude-code-ide-authorization: \\(.+\\)\r\n" text)
+                         (let ((client-token (match-string 1 text)))
+                           (if (string= client-token expected-token)
+                               (setq auth-valid t)
+                             (message "IDE connection rejected: auth token mismatch")))
+                       (message "IDE connection rejected: missing auth header"))
+
+                     (if auth-valid
+                         ;; Auth valid - proceed with normal WebSocket handshake
+                         (let ((header-info (websocket-verify-client-headers text)))
+                           (if header-info
+                               (progn (setf (websocket-accept-string ws)
+                                            (websocket-calculate-accept
+                                             (plist-get header-info :key)))
+                                      (process-send-string
+                                       process
+                                       (websocket-get-server-response
+                                        ws (plist-get header-info :protocols)
+                                        (plist-get header-info :extensions)))
+                                      (setf (websocket-ready-state ws) 'open)
+                                      (setf (websocket-origin ws) (plist-get header-info :origin))
+                                      (websocket-try-callback 'websocket-on-open
+                                                              'on-open ws))
+                             (message "Invalid client headers found in: %s" output)
+                             (process-send-string process "HTTP/1.1 400 Bad Request\r\n\r\n")
+                             (websocket-close ws)))
+                       ;; Auth invalid - send 401 and close
+                       (process-send-string process "HTTP/1.1 401 Unauthorized\r\n\r\n")
+                       (websocket-close ws)))
+                   (when (> (length text) (+ 1 end-of-header-pos))
+                     (claude-code-ide-server-filter process (substring
+                                                              text
+                                                              end-of-header-pos))))
+               (setf (websocket-inflight-input ws) text))))
+          ((eq (websocket-ready-state ws) 'open)
+           (websocket-process-input-on-open-ws ws text))
+          ((eq (websocket-ready-state ws) 'closed)
+           (message "WARNING: Should not have received further input on closed websocket")))))
+
 (defun claude-code-ide-generate-uuid ()
   "Generate a random UUID for authentication."
   (format "%04x%04x-%04x-%04x-%04x-%04x%04x%04x"
@@ -69,11 +144,6 @@ Each value is an alist with keys:
           (random 65536)
           (random 65536)))
 
-(defun claude-code-ide-validate-auth-header (headers auth-token)
-  "Validate authentication header in HEADERS matches AUTH-TOKEN.
-Returns non-nil if valid, nil otherwise."
-  (when-let ((auth-header (cdr (assoc "x-claude-code-ide-authorization" headers))))
-    (string= auth-header auth-token)))
 
 ;;; JSON-RPC Message Handling
 
@@ -139,37 +209,36 @@ Returns a cons cell (PORT . AUTH-TOKEN)."
                            (cons 'port nil)))
          (server nil))
 
-    ;; Create WebSocket server on port 0 (OS assigns)
+    ;; Create WebSocket server using make-network-process directly
+    ;; This allows us to use a custom filter for auth validation
     (setq server
-          (websocket-server
-           0
+          (make-network-process
+           :name (format "IDE websocket server on port %d" 0)
+           :server t
+           :family 'ipv4
+           :noquery t
+           :filter 'claude-code-ide-server-filter
+           :log 'websocket-server-accept
+           :filter-multibyte nil
+           :plist (list :on-open
+                        (lambda (websocket)
+                          (message "Claude Code connected to IDE server (authenticated)")
+                          ;; Store the websocket connection
+                          (setcdr (assoc 'websocket server-info) websocket))
+                        :on-message
+                        (lambda (websocket frame)
+                          (claude-code-ide-handle-message websocket frame project-root))
+                        :on-close
+                        (lambda (_websocket)
+                          (message "Claude Code disconnected from IDE server")
+                          ;; Clear the websocket reference
+                          (setcdr (assoc 'websocket server-info) nil))
+                        :on-error
+                        (lambda (_websocket type error)
+                          (message "IDE WebSocket error: %s - %S" type error))
+                        :claude-code-auth-token auth-token)
            :host 'local
-           :on-open
-           (lambda (websocket)
-             (let ((headers (websocket-server-conn-headers websocket)))
-               ;; Validate authentication header
-               (if (claude-code-ide-validate-auth-header headers auth-token)
-                   (progn
-                     (message "Claude Code connected to IDE server (authenticated)")
-                     ;; Store the websocket connection
-                     (setcdr (assoc 'websocket server-info) websocket))
-                 (progn
-                   (message "Claude Code connection rejected: invalid auth token")
-                   (websocket-close websocket)))))
-
-           :on-message
-           (lambda (websocket frame)
-             (claude-code-ide-handle-message websocket frame project-root))
-
-           :on-close
-           (lambda (_websocket)
-             (message "Claude Code disconnected from IDE server")
-             ;; Clear the websocket reference
-             (setcdr (assoc 'websocket server-info) nil))
-
-           :on-error
-           (lambda (_websocket type error)
-             (message "IDE WebSocket error: %s - %S" type error))))
+           :service 0))
 
     ;; Get the assigned port from the server process
     ;; websocket-server returns a process, not a websocket
