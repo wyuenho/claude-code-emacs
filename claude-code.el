@@ -31,13 +31,14 @@
 ;; - Transient menu for common operations
 ;; - File path completion with @ syntax
 ;; - Custom commands support
+;; - IDE protocol integration with WebSocket server
 ;; - MCP server integration with real-time event notifications
 ;;
 ;; Optional dependencies:
-;; - lsp-mode (9.0.0): For LSP diagnostic fixing and MCP tools
-;; - websocket (1.15): For MCP server WebSocket communication
+;; - lsp-mode (9.0.0): For LSP diagnostic fixing and IDE tools
+;; - websocket (1.15): For IDE WebSocket server and MCP communication
 ;;
-;; These are only required if you want to use MCP features or LSP diagnostics.
+;; These are only required if you want to use IDE protocol or MCP features.
 ;;
 ;; Quick start:
 ;;
@@ -75,6 +76,12 @@
 ;; MCP integration (only when websocket is available)
 (require 'claude-code-mcp)
 (require 'claude-code-mcp-events)
+
+;; IDE protocol integration (only when websocket is available)
+(when (featurep 'websocket)
+  (require 'claude-code-ide-server)
+  (require 'claude-code-ide-tools)
+  (require 'claude-code-ide-events))
 
 (provide 'claude-code)
 ;;; claude-code.el ends here

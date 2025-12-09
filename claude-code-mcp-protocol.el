@@ -58,6 +58,15 @@
 (declare-function claude-code-mcp-handle-openCurrentChanges "claude-code-mcp-tools" (params))
 (declare-function claude-code-mcp-handle-openDiffContent "claude-code-mcp-tools" (params))
 (declare-function claude-code-mcp-handle-sendNotification "claude-code-mcp-tools" (params))
+;; IDE Protocol tool handlers
+(declare-function claude-code-mcp-handle-openFile "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-getLatestSelection "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-getOpenEditors "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-getWorkspaceFolders "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-checkDocumentDirty "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-saveDocument "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-closeTab "claude-code-mcp-tools" (params))
+(declare-function claude-code-mcp-handle-closeAllDiffTabs "claude-code-mcp-tools" (params))
 
 ;;; JSON-RPC Communication
 

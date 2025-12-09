@@ -44,7 +44,10 @@ The package is modularized into several components:
 - **claude-code-prompt.el** - Prompt file management and mode
 - **claude-code-mcp.el** - MCP WebSocket client integration
 - **claude-code-mcp-*.el** - MCP protocol implementation
-- **claude-code-mcp-events.el** - Real-time event notifications
+- **claude-code-mcp-events.el** - Real-time event notifications (MCP)
+- **claude-code-ide-server.el** - IDE WebSocket server
+- **claude-code-ide-tools.el** - IDE protocol tool handlers
+- **claude-code-ide-events.el** - IDE protocol event notifications
 
 ## Development Commands
 
@@ -251,9 +254,47 @@ The MCP server provides a bridge between Claude Code and Emacs:
 - WebSocket server on dynamic port for Emacs connection
 - stdio interface for Claude Code MCP protocol
 - Implements tools: getOpenBuffers, getCurrentSelection, getDiagnostics, getDefinition, findReferences, describeSymbol, diff tools (openDiffFile, openRevisionDiff, openCurrentChanges, openDiffContent), sendNotification
+- IDE protocol tools: openFile, getLatestSelection, getOpenEditors, getWorkspaceFolders, checkDocumentDirty, saveDocument, close_tab, closeAllDiffTabs
 - Implements resources: buffer content, project info
 - Per-project WebSocket connections for session isolation
 - Real-time event notifications from Emacs to Claude Code
+- IDE discovery via lock file mechanism for Claude Code recognition
+
+### IDE Protocol Integration
+The MCP server implements the Claude Code IDE protocol, allowing Emacs to be recognized as a full-featured IDE:
+
+#### Discovery Mechanism
+1. **Lock File**: MCP server creates `~/.claude/ide/[port].lock` with protocol-compliant format:
+   ```json
+   {
+     "pid": <process_id>,
+     "workspaceFolders": ["/path/to/project"],
+     "ideName": "Emacs",
+     "transport": "ws",
+     "authToken": "550e8400-e29b-41d4-a716-446655440000"
+   }
+   ```
+   - Field names match official IDE protocol specification
+   - Stale lock files (from dead processes) are automatically cleaned up
+2. **Port Assignment**: Uses OS-assigned ports (port 0) to avoid race conditions
+3. **Authentication**: Validates `x-claude-code-ide-authorization` header on WebSocket connections
+
+#### IDE Tools
+The following IDE-specific tools are implemented:
+- **openFile**: Open files with optional pattern search and preview mode
+- **getLatestSelection**: Track and retrieve the most recent text selection
+- **getOpenEditors**: List all open tabs with URIs and dirty status
+- **getWorkspaceFolders**: Return workspace folder information
+- **checkDocumentDirty**: Check if files have unsaved changes
+- **saveDocument**: Save files to disk
+- **close_tab**: Close editor tabs/buffers
+- **closeAllDiffTabs**: Close all diff/ediff buffers
+
+#### Selection Tracking
+The MCP server automatically tracks selections in Emacs:
+- Selections are captured when the mark is deactivated
+- Latest selection is available via `getLatestSelection` tool
+- Used by Claude Code for context-aware assistance
 
 ### How MCP Connection Works
 1. Claude Code automatically starts the MCP server when you begin a session (no need to type `/mcp`)
@@ -363,6 +404,17 @@ The MCP server supports real-time notifications from Emacs:
 - **Timer management**: Ping timers are properly cleaned up on disconnect to prevent resource leaks
 
 ### Recent Changes
+- **IDE Protocol Notifications**:
+  - Implemented `selection_changed` notification: Automatically sent when user selection changes
+  - Implemented `at_mentioned` notification: Sent when user explicitly includes code as context
+  - Added `claude-code-ide-send-at-mention` command for manual context sharing
+  - Added `@` keybinding in transient menu (only visible when selection is active)
+  - Events automatically enabled/disabled with IDE server lifecycle
+  - Configurable debounce delay via `claude-code-ide-events-selection-delay`
+- **IDE Protocol Tool Updates**:
+  - Updated `openFile` tool to match protocol: renamed `path` → `filePath`, added `startText`, `endText`, `selectToEndOfLine`, `makeFrontmost` parameters
+  - Updated `openDiff` tool to match protocol: renamed `fileA`/`fileB` → `old_file_path`/`new_file_path`, added `new_file_contents` and `tab_name` parameters
+  - Enhanced `openDiff` to support file-to-content comparison (not just file-to-file)
 - **Version 0.7.0**:
   - Added `claude-code-send-ctrl-t` function for toggling TODO display (Ctrl+T)
   - Changed toggle expand from Ctrl+R to Ctrl+O to match Claude Code updates

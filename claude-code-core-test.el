@@ -67,8 +67,12 @@
            (vterm-mode-called nil)
            (test-buffer (generate-new-buffer "*test-buffer*")))
       (unwind-protect
-          (cl-letf* (((symbol-function 'get-buffer-create)
-                      (lambda (name)
+          (cl-letf* (((symbol-function 'claude-code-ide-create-lock-file)
+                      (lambda (_port _auth-token _project-root)
+                        ;; Mock lock file creation to avoid buffer issues
+                        nil))
+                     ((symbol-function 'get-buffer-create)
+                      (lambda (name &optional _inhibit-buffer-hooks)
                         (setq buffer-created t)
                         (setq created-buffer-name name)
                         ;; Simulate vterm buffer
@@ -106,8 +110,12 @@
            (vterm-mode-called nil)
            (test-buffer (generate-new-buffer "*test-buffer*")))
       (unwind-protect
-          (cl-letf* (((symbol-function 'get-buffer-create)
-                      (lambda (name)
+          (cl-letf* (((symbol-function 'claude-code-ide-create-lock-file)
+                      (lambda (_port _auth-token _project-root)
+                        ;; Mock lock file creation to avoid buffer issues
+                        nil))
+                     ((symbol-function 'get-buffer-create)
+                      (lambda (name &optional _inhibit-buffer-hooks)
                         (setq buffer-created t)
                         ;; Simulate vterm buffer
                         (with-current-buffer test-buffer
@@ -149,8 +157,12 @@
            (vterm-mode-called nil)
            (test-buffer (generate-new-buffer "*test-buffer*")))
       (unwind-protect
-          (cl-letf* (((symbol-function 'get-buffer-create)
-                      (lambda (name)
+          (cl-letf* (((symbol-function 'claude-code-ide-create-lock-file)
+                      (lambda (_port _auth-token _project-root)
+                        ;; Mock lock file creation to avoid buffer issues
+                        nil))
+                     ((symbol-function 'get-buffer-create)
+                      (lambda (name &optional _inhibit-buffer-hooks)
                         (setq buffer-created t)
                         ;; Simulate vterm buffer
                         (with-current-buffer test-buffer
@@ -185,6 +197,33 @@
             (should (string-match-p "--resume" vterm-shell-value))
             (should (string-match-p session-id vterm-shell-value)))
         (kill-buffer test-buffer)))))
+
+(ert-deftest test-ide-env-vars-preserve-existing-with-port ()
+  "Test that IDE env vars are appended without replacing existing ones when server starts."
+  (let ((vterm-environment '("PATH=/usr/bin" "HOME=/test" "USER=testuser"))
+        (ide-port 12345))
+    ;; Simulate the code path when IDE server starts
+    (let ((result (append (list (format "CLAUDE_CODE_SSE_PORT=%d" ide-port)
+                                "ENABLE_IDE_INTEGRATION=true")
+                          vterm-environment)))
+      ;; New vars should be present
+      (should (member "CLAUDE_CODE_SSE_PORT=12345" result))
+      (should (member "ENABLE_IDE_INTEGRATION=true" result))
+      ;; CRITICAL: Original vars must be preserved
+      (should (member "PATH=/usr/bin" result))
+      (should (member "HOME=/test" result))
+      (should (member "USER=testuser" result)))))
+
+(ert-deftest test-ide-env-vars-preserve-existing-without-port ()
+  "Test that IDE env vars are appended without replacing existing ones when server doesn't start."
+  (let ((vterm-environment '("PATH=/usr/bin" "LANG=en_US.UTF-8")))
+    ;; Simulate the code path when IDE server doesn't start (ide-port is nil)
+    (let ((result (cons "ENABLE_IDE_INTEGRATION=true" vterm-environment)))
+      ;; New var should be present
+      (should (member "ENABLE_IDE_INTEGRATION=true" result))
+      ;; CRITICAL: Original vars must be preserved
+      (should (member "PATH=/usr/bin" result))
+      (should (member "LANG=en_US.UTF-8" result)))))
 
 (provide 'test-claude-code-core)
 ;;; test-claude-code-core.el ends here

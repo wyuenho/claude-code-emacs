@@ -297,7 +297,8 @@ INPUT is the terminal output string."
     ("p" "Open Prompt File" claude-code-open-prompt-file)]
    ["Actions"
     ("s" "Send menu" claude-code-send-transient)
-    ("i" "Insert menu" claude-code-insert-transient)]
+    ("i" "Insert menu" claude-code-insert-transient)
+    ("@" "Mention selection to Claude" claude-code-ide-send-at-mention :if (lambda () (and (featurep 'websocket) (use-region-p))))]
    ["Quick Send"
     ("1" "Send 1" claude-code-send-1)
     ("y" "Send 1 (yes)" claude-code-send-1)

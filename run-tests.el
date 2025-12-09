@@ -32,6 +32,14 @@
   (load-file "claude-code-mcp-tools-test.el")
   (load-file "claude-code-mcp-events-test.el"))
 
+;; IDE protocol tests (if available)
+(when (file-exists-p "claude-code-ide-test.el")
+  (load-file "claude-code-ide-test.el"))
+
+;; IDE events tests (if available)
+(when (file-exists-p "claude-code-ide-events-test.el")
+  (load-file "claude-code-ide-events-test.el"))
+
 ;; Note: Old test files are no longer loaded to avoid duplicate test definitions
 ;; The tests have been split into module-specific files above
 

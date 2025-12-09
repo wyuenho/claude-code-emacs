@@ -121,9 +121,8 @@
   "Test openDiffFile handler."
   (let* ((test-file-a (make-temp-file "test-diff-a"))
          (test-file-b (make-temp-file "test-diff-b"))
-         (params `((mode . "files")
-                   (fileA . ,(file-name-nondirectory test-file-a))
-                   (fileB . ,(file-name-nondirectory test-file-b)))))
+         (params `((old_file_path . ,(file-name-nondirectory test-file-a))
+                   (new_file_path . ,(file-name-nondirectory test-file-b)))))
     (unwind-protect
         (progn
           (with-temp-file test-file-a
@@ -960,6 +959,213 @@
         (let ((call (car message-calls)))
           (should (equal (plist-get call 'format) "[%s] %s"))
           (should (equal (plist-get call 'args) '("Test Title" "Test message"))))))))
+
+;;; IDE Protocol Tool Tests
+
+(ert-deftest test-mcp-handle-openFile ()
+  "Test openFile handler."
+  (with-temp-buffer
+    (let* ((temp-file (make-temp-file "test-openFile"))
+           (project-root (file-name-directory temp-file)))
+      (cl-letf (((symbol-function 'projectile-project-root)
+                 (lambda () project-root)))
+        (let ((result (claude-code-mcp-handle-openFile
+                       `((filePath . ,temp-file)))))
+          (should (equal (cdr (assoc 'success result)) t))
+          (should (string-match-p "Opened file" (cdr (assoc 'message result))))
+          (delete-file temp-file))))))
+
+(ert-deftest test-mcp-handle-openFile-with-pattern ()
+  "Test openFile handler with startText search."
+  (with-temp-buffer
+    (let* ((temp-file (make-temp-file "test-openFile"))
+           (project-root (file-name-directory temp-file))
+           (_ (with-temp-file temp-file (insert "hello world\ntest pattern\nfoo bar"))))
+      (cl-letf (((symbol-function 'projectile-project-root)
+                 (lambda () project-root)))
+        (let ((result (claude-code-mcp-handle-openFile
+                       `((filePath . ,temp-file)
+                         (startText . "test pattern")))))
+          (should (equal (cdr (assoc 'success result)) t))
+          (delete-file temp-file))))))
+
+(ert-deftest test-mcp-handle-openFile-nonexistent ()
+  "Test openFile handler with nonexistent file."
+  (cl-letf (((symbol-function 'projectile-project-root)
+             (lambda () "/nonexistent/")))
+    (let ((result (claude-code-mcp-handle-openFile
+                   '((filePath . "/nonexistent/file.txt")))))
+      (should (equal (cdr (assoc 'success result)) json-false))
+      (should (string-match-p "File not found" (cdr (assoc 'message result)))))))
+
+(ert-deftest test-mcp-handle-openFile-outside-project ()
+  "Test openFile handler with path outside project boundaries."
+  (cl-letf (((symbol-function 'projectile-project-root)
+             (lambda () "/test/workspace/")))
+    (let ((result (claude-code-mcp-handle-openFile
+                   '((filePath . "/etc/passwd")))))
+      (should (equal (cdr (assoc 'success result)) json-false))
+      (should (string-match-p "outside project boundaries" (cdr (assoc 'message result)))))))
+
+(ert-deftest test-mcp-handle-openFile-preview-unreadable ()
+  "Test openFile handler with preview mode on unreadable file."
+  (with-temp-buffer
+    (let* ((temp-file (make-temp-file "test-openFile"))
+           (project-root (file-name-directory temp-file)))
+      (cl-letf (((symbol-function 'projectile-project-root)
+                 (lambda () project-root)))
+        ;; Make file unreadable (on Unix-like systems)
+        (set-file-modes temp-file #o000)
+        (let ((result (claude-code-mcp-handle-openFile
+                       `((filePath . ,temp-file)
+                         (preview . t)))))
+          (should (equal (cdr (assoc 'success result)) json-false))
+          (should (string-match-p "not readable" (cdr (assoc 'message result)))))
+        ;; Clean up: restore permissions before deleting
+        (set-file-modes temp-file #o644)
+        (delete-file temp-file)))))
+
+(ert-deftest test-mcp-handle-getLatestSelection ()
+  "Test getLatestSelection handler with no selection."
+  (let ((claude-code-mcp-latest-selection nil))
+    (let ((result (claude-code-mcp-handle-getLatestSelection '())))
+      (should (equal (cdr (assoc 'text result)) ""))
+      (should (equal (cdr (assoc 'startLine result)) 0)))))
+
+(ert-deftest test-mcp-handle-getLatestSelection-with-selection ()
+  "Test getLatestSelection handler with stored selection."
+  (let ((claude-code-mcp-latest-selection
+         '((text . "selected text")
+           (startLine . 5)
+           (endLine . 10)
+           (startChar . 2)
+           (endChar . 8)
+           (fileName . "/test/file.el"))))
+    (let ((result (claude-code-mcp-handle-getLatestSelection '())))
+      (should (equal (cdr (assoc 'text result)) "selected text"))
+      (should (equal (cdr (assoc 'startLine result)) 5))
+      (should (equal (cdr (assoc 'fileName result)) "/test/file.el")))))
+
+(ert-deftest test-mcp-handle-getOpenEditors ()
+  "Test getOpenEditors handler."
+  (with-temp-buffer
+    (let* ((temp-file (make-temp-file "test-editor"))
+           (project-root (file-name-directory temp-file)))
+      (with-current-buffer (find-file-noselect temp-file)
+        (cl-letf (((symbol-function 'projectile-project-root)
+                   (lambda () project-root)))
+          (let ((result (claude-code-mcp-handle-getOpenEditors '())))
+            (should (assoc 'editors result))
+            (let ((editors (cdr (assoc 'editors result))))
+              (should (listp editors))
+              (should (> (length editors) 0))
+              (should (assoc 'uri (car editors)))
+              (should (assoc 'label (car editors)))
+              (should (assoc 'isDirty (car editors))))))
+        (kill-buffer))
+      (delete-file temp-file))))
+
+(ert-deftest test-mcp-handle-getWorkspaceFolders ()
+  "Test getWorkspaceFolders handler."
+  (cl-letf (((symbol-function 'projectile-project-root)
+             (lambda () "/test/workspace/")))
+    (let ((result (claude-code-mcp-handle-getWorkspaceFolders '())))
+      (should (assoc 'folders result))
+      (let* ((folders (cdr (assoc 'folders result)))
+             (folder (car folders)))
+        (should (= (length folders) 1))
+        (should (equal (cdr (assoc 'uri folder)) "/test/workspace"))
+        (should (equal (cdr (assoc 'name folder)) "workspace"))))))
+
+(ert-deftest test-mcp-handle-checkDocumentDirty ()
+  "Test checkDocumentDirty handler."
+  (with-temp-buffer
+    (let ((temp-file (make-temp-file "test-dirty")))
+      (with-current-buffer (find-file-noselect temp-file)
+        (insert "test content")
+        (let ((result (claude-code-mcp-handle-checkDocumentDirty
+                       `((path . ,temp-file)))))
+          (should (equal (cdr (assoc 'dirty result)) t))
+          (should (equal (cdr (assoc 'path result)) temp-file)))
+        (save-buffer)
+        (let ((result (claude-code-mcp-handle-checkDocumentDirty
+                       `((path . ,temp-file)))))
+          (should (equal (cdr (assoc 'dirty result)) json-false)))
+        (kill-buffer))
+      (delete-file temp-file))))
+
+(ert-deftest test-mcp-handle-checkDocumentDirty-nonexistent ()
+  "Test checkDocumentDirty with file not in buffer."
+  (let ((result (claude-code-mcp-handle-checkDocumentDirty
+                 '((path . "/nonexistent/file.txt")))))
+    (should (equal (cdr (assoc 'dirty result)) json-false))))
+
+(ert-deftest test-mcp-handle-saveDocument ()
+  "Test saveDocument handler."
+  (with-temp-buffer
+    (let ((temp-file (make-temp-file "test-save")))
+      (with-current-buffer (find-file-noselect temp-file)
+        (insert "new content")
+        (let ((result (claude-code-mcp-handle-saveDocument
+                       `((path . ,temp-file)))))
+          (should (equal (cdr (assoc 'success result)) t))
+          (should (string-match-p "Saved file" (cdr (assoc 'message result))))
+          (should-not (buffer-modified-p)))
+        (kill-buffer))
+      (delete-file temp-file))))
+
+(ert-deftest test-mcp-handle-saveDocument-not-found ()
+  "Test saveDocument with file not in buffer."
+  (let ((result (claude-code-mcp-handle-saveDocument
+                 '((path . "/nonexistent/file.txt")))))
+    (should (equal (cdr (assoc 'success result)) json-false))
+    (should (string-match-p "Buffer not found" (cdr (assoc 'message result))))))
+
+(ert-deftest test-mcp-handle-closeTab ()
+  "Test closeTab handler."
+  (with-temp-buffer
+    (let ((temp-file (make-temp-file "test-close")))
+      (with-current-buffer (find-file-noselect temp-file)
+        (let ((buffer-to-close (current-buffer)))
+          (let ((result (claude-code-mcp-handle-closeTab
+                         `((path . ,temp-file)))))
+            (should (equal (cdr (assoc 'success result)) t))
+            (should-not (buffer-live-p buffer-to-close)))))
+      (when (file-exists-p temp-file)
+        (delete-file temp-file)))))
+
+(ert-deftest test-mcp-handle-closeTab-not-found ()
+  "Test closeTab with file not in buffer."
+  (let ((result (claude-code-mcp-handle-closeTab
+                 '((path . "/nonexistent/file.txt")))))
+    (should (equal (cdr (assoc 'success result)) json-false))
+    (should (string-match-p "Buffer not found" (cdr (assoc 'message result))))))
+
+(ert-deftest test-mcp-handle-closeAllDiffTabs ()
+  "Test closeAllDiffTabs handler."
+  ;; Create some buffers with diff-like names
+  (let ((diff-buffers '()))
+    (dotimes (i 3)
+      (push (generate-new-buffer (format "*ediff-test-%d*" i)) diff-buffers))
+
+    (let ((result (claude-code-mcp-handle-closeAllDiffTabs '())))
+      (should (equal (cdr (assoc 'success result)) t))
+      (should (>= (cdr (assoc 'closed result)) 3))
+
+      ;; Verify buffers were closed
+      (dolist (buf diff-buffers)
+        (should-not (buffer-live-p buf))))))
+
+(ert-deftest test-mcp-handle-closeAllDiffTabs-none ()
+  "Test closeAllDiffTabs with no diff buffers."
+  ;; Close any existing diff buffers first
+  (dolist (buf (buffer-list))
+    (when (string-prefix-p "*ediff" (buffer-name buf))
+      (kill-buffer buf)))
+
+  (let ((result (claude-code-mcp-handle-closeAllDiffTabs '())))
+    (should (equal (cdr (assoc 'success result)) t))
+    (should (= (cdr (assoc 'closed result)) 0))))
 
 (provide 'test-claude-code-mcp-tools)
 ;;; test-claude-code-mcp-tools.el ends here

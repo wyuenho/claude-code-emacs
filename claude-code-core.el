@@ -29,10 +29,12 @@
 ;;; Code:
 
 (require 'projectile)
+(require 'json)
 
 ;; vterm variables
 (defvar vterm-timer-delay)
 (defvar vterm-shell)
+(defvar vterm-environment)
 
 (declare-function vterm-send-return "vterm" ())
 (declare-function vterm-send-string "vterm" (string &optional paste-p))
@@ -40,6 +42,10 @@
 ;; Forward declarations for MCP integration
 (declare-function claude-code-mcp-disconnect "claude-code-mcp-connection" (project-root))
 (declare-function claude-code-vterm-mode "claude-code-ui" ())
+
+;; Forward declarations for IDE integration
+(declare-function claude-code-ide-server-start "claude-code-ide-server" (project-root))
+(declare-function claude-code-ide-server-stop "claude-code-ide-server" (project-root))
 
 ;;; Customization
 
@@ -92,6 +98,35 @@ Return nil if not in a project."
     (with-current-buffer buf
       (funcall body-fn))))
 
+;;; IDE Lock File Management
+
+(defun claude-code-ide-create-lock-file (port auth-token project-root)
+  "Create ~/.claude/ide/<port>.lock with authentication token.
+PORT is the WebSocket server port.
+AUTH-TOKEN is the UUID for authentication.
+PROJECT-ROOT is the project workspace folder."
+  (let* ((ide-dir (expand-file-name "~/.claude/ide"))
+         (lock-file (expand-file-name (format "%d.lock" port) ide-dir))
+         (lock-data `((pid . ,(emacs-pid))
+                      (workspaceFolders . (,project-root))
+                      (ideName . "Emacs")
+                      (transport . "ws")
+                      (authToken . ,auth-token))))
+    ;; Ensure ~/.claude/ide directory exists with secure permissions (700)
+    (unless (file-exists-p ide-dir)
+      (make-directory ide-dir t)
+      (set-file-modes ide-dir #o700))
+    ;; Write lock file directly to avoid with-temp-file issues in tests
+    (write-region (json-encode lock-data) nil lock-file nil 'silent)
+    (set-file-modes lock-file #o600)
+    lock-file))
+
+(defun claude-code-ide-remove-lock-file (port)
+  "Remove IDE lock file for PORT if it exists."
+  (let ((lock-file (expand-file-name (format "~/.claude/ide/%d.lock" port))))
+    (when (file-exists-p lock-file)
+      (delete-file lock-file))))
+
 ;;; Session Management
 
 ;;;###autoload
@@ -102,6 +137,31 @@ With prefix argument, select from available options."
   (let* ((buffer-name (claude-code-buffer-name))
          (project-root (claude-code-normalize-project-root (projectile-project-root)))
          (default-directory project-root)
+
+         ;; Start IDE WebSocket server FIRST (if available)
+         (server-info (when (featurep 'websocket)
+                        (condition-case err
+                            (claude-code-ide-server-start project-root)
+                          (error
+                           (message "Failed to start IDE server: %S" err)
+                           nil))))
+         (ide-port (when server-info (car server-info)))
+         (auth-token (when server-info (cdr server-info)))
+
+         ;; Create lock file if IDE server started successfully
+         (_ (when (and ide-port auth-token)
+              (claude-code-ide-create-lock-file ide-port auth-token project-root)
+              ;; Enable IDE event notifications
+              (when (fboundp 'claude-code-ide-events-enable)
+                (claude-code-ide-events-enable))))
+
+         ;; Set environment variables for IDE integration
+         (vterm-environment (if ide-port
+                                (append (list (format "CLAUDE_CODE_SSE_PORT=%d" ide-port)
+                                              "ENABLE_IDE_INTEGRATION=true")
+                                        vterm-environment)
+                              (cons "ENABLE_IDE_INTEGRATION=true" vterm-environment)))
+
          (buf (get-buffer-create buffer-name))
          (selected-option (when current-prefix-arg
                             (let* ((choices (mapcar (lambda (opt)
@@ -120,6 +180,12 @@ With prefix argument, select from available options."
                                 (concat " " selected-option))
                               (when extra-input
                                 (concat " " extra-input)))))
+
+    ;; Log IDE server status
+    (if ide-port
+        (message "IDE server started on port %d" ide-port)
+      (message "IDE server not started (websocket.el not available)"))
+
     (with-current-buffer buf
       (unless (eq major-mode 'claude-code-vterm-mode)
         (claude-code-vterm-mode)))
@@ -152,9 +218,18 @@ With prefix argument, select from available options."
   "Quit the Claude Code session for the current project and kill the buffer."
   (interactive)
   (let* ((buffer-name (claude-code-buffer-name))
-         (buffer (get-buffer buffer-name)))
+         (buffer (get-buffer buffer-name))
+         (project-root (claude-code-normalize-project-root (projectile-project-root))))
     (if buffer
         (progn
+          ;; Stop IDE server if it's running
+          (when (and (featurep 'websocket)
+                     (fboundp 'claude-code-ide-server-stop))
+            ;; Disable IDE event notifications
+            (when (fboundp 'claude-code-ide-events-disable)
+              (claude-code-ide-events-disable))
+            (claude-code-ide-server-stop project-root))
+
           ;; First close any windows showing the buffer
           (dolist (window (get-buffer-window-list buffer nil t))
             (delete-window window))

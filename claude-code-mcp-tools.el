@@ -170,22 +170,50 @@ Returns project-wide diagnostics using specified buffer for LSP context."
 ;;; Diff Tool Handlers
 
 (defun claude-code-mcp-handle-openDiffFile (params)
-  "Handle openDiffFile request with PARAMS."
-  (let ((file-a (cdr (assoc 'fileA params)))
-        (file-b (cdr (assoc 'fileB params))))
+  "Handle openDiffFile request with PARAMS per IDE protocol.
+Opens a diff view comparing two files or file with content.
+
+Parameters:
+- old_file_path: Path to the old/original file (required)
+- new_file_path: Path to the new/modified file (optional if new_file_contents provided)
+- new_file_contents: String content for comparison (optional, overrides new_file_path)
+- tab_name: Name for the diff tab (optional)"
+  (let ((old-file-path (cdr (assoc 'old_file_path params)))
+        (new-file-path (cdr (assoc 'new_file_path params)))
+        (new-file-contents (cdr (assoc 'new_file_contents params)))
+        (tab-name (cdr (assoc 'tab_name params))))
     (condition-case err
         (progn
-          (unless (and file-a file-b)
-            (error "Missing required parameters: fileA and fileB"))
-          (let ((path-a (expand-file-name file-a (claude-code-normalize-project-root (projectile-project-root))))
-                (path-b (expand-file-name file-b (claude-code-normalize-project-root (projectile-project-root)))))
-            (unless (file-exists-p path-a)
-              (error "File not found: %s" path-a))
-            (unless (file-exists-p path-b)
-              (error "File not found: %s" path-b))
-            (ediff-files path-a path-b))
-          `((status . "success")
-            (message . "Opened ediff session")))
+          (unless old-file-path
+            (error "Missing required parameter: old_file_path"))
+          (let* ((project-root (claude-code-normalize-project-root (projectile-project-root)))
+                 (old-path (expand-file-name old-file-path project-root)))
+            (unless (file-exists-p old-path)
+              (error "File not found: %s" old-path))
+            ;; Handle two cases: file-to-file or file-to-content
+            (if new-file-contents
+                ;; Compare old file with provided content
+                (let* ((temp-buf-name (or tab-name
+                                          (format "*Claude Diff: %s*"
+                                                  (file-name-nondirectory old-file-path))))
+                       (temp-buf (get-buffer-create temp-buf-name)))
+                  (with-current-buffer temp-buf
+                    (erase-buffer)
+                    (insert new-file-contents)
+                    (goto-char (point-min)))
+                  (ediff-buffers
+                   (find-file-noselect old-path)
+                   temp-buf))
+              ;; Compare two files
+              (progn
+                (unless new-file-path
+                  (error "Either new_file_path or new_file_contents must be provided"))
+                (let ((new-path (expand-file-name new-file-path project-root)))
+                  (unless (file-exists-p new-path)
+                    (error "File not found: %s" new-path))
+                  (ediff-files old-path new-path))))
+            `((status . "success")
+              (message . "Opened diff session"))))
       (error
        `((status . "error")
          (message . ,(error-message-string err)))))))
@@ -664,6 +692,202 @@ PARAMS should include \\='title\\=' and \\='message\\='."
     ;; Return success response
     `((success . t)
       (message . "Notification sent"))))
+
+;;; IDE Protocol Tool Handlers
+
+(defun claude-code-mcp-handle-openFile (params)
+  "Handle openFile request with PARAMS per IDE protocol.
+Opens file in Emacs with optional text selection.
+
+Parameters:
+- filePath: File path relative to workspace root (required)
+- preview: Open in preview/read-only mode (optional)
+- startText: Text to search for as selection start (optional)
+- endText: Text to search for as selection end (optional)
+- selectToEndOfLine: Extend selection to end of line (optional)
+- makeFrontmost: Bring window to front (optional, always true in Emacs)"
+  (let ((file-path (cdr (assoc 'filePath params)))
+        (preview (cdr (assoc 'preview params)))
+        (start-text (cdr (assoc 'startText params)))
+        (end-text (cdr (assoc 'endText params)))
+        (select-to-eol (cdr (assoc 'selectToEndOfLine params))))
+    (condition-case err
+        (progn
+          (unless file-path
+            (error "filePath is required"))
+          (let* ((full-path (expand-file-name file-path))
+                 (project-root (claude-code-normalize-project-root (projectile-project-root))))
+            ;; Security: Validate path is within project boundaries
+            (unless (string-prefix-p project-root full-path)
+              (error "Path outside project boundaries: %s" file-path))
+            (unless (file-exists-p full-path)
+              (error "File not found: %s" full-path))
+            ;; Check file is readable before opening in preview mode
+            (when preview
+              (unless (file-readable-p full-path)
+                (error "File not readable: %s" full-path)))
+            ;; Open the file
+            (if preview
+                (view-file-other-window full-path)
+              (find-file full-path))
+            ;; Handle text selection if startText is provided
+            (when (and start-text (not (string-empty-p start-text)))
+              (goto-char (point-min))
+              (when (search-forward start-text nil t)
+                (let ((start-pos (match-beginning 0))
+                      (end-pos (match-end 0)))
+                  ;; If endText is provided, search for it after startText
+                  (when (and end-text (not (string-empty-p end-text)))
+                    (when (search-forward end-text nil t)
+                      (setq end-pos (match-end 0))))
+                  ;; Extend to end of line if requested
+                  (when select-to-eol
+                    (goto-char end-pos)
+                    (setq end-pos (line-end-position)))
+                  ;; Set the selection
+                  (goto-char start-pos)
+                  (push-mark end-pos t t))))
+            `((success . t)
+              (message . ,(format "Opened file: %s" file-path)))))
+      (error
+       `((success . ,json-false)
+         (message . ,(error-message-string err)))))))
+
+(defvar claude-code-mcp-latest-selection nil
+  "Store the latest selection for getLatestSelection tool.")
+
+(defun claude-code-mcp-track-selection ()
+  "Track the current selection when deactivating mark."
+  (when (and (use-region-p) (buffer-file-name))
+    (setq claude-code-mcp-latest-selection
+          `((text . ,(buffer-substring-no-properties (region-beginning) (region-end)))
+            (startLine . ,(line-number-at-pos (region-beginning)))
+            (endLine . ,(line-number-at-pos (region-end)))
+            (startChar . ,(save-excursion
+                            (goto-char (region-beginning))
+                            (current-column)))
+            (endChar . ,(save-excursion
+                          (goto-char (region-end))
+                          (current-column)))
+            (fileName . ,(buffer-file-name))))))
+
+;; Add hook to track selections
+(add-hook 'deactivate-mark-hook #'claude-code-mcp-track-selection)
+
+(defun claude-code-mcp-handle-getLatestSelection (_params)
+  "Handle getLatestSelection request.
+Returns the most recent selection across all editors."
+  (if claude-code-mcp-latest-selection
+      claude-code-mcp-latest-selection
+    `((text . "")
+      (startLine . 0)
+      (endLine . 0)
+      (startChar . 0)
+      (endChar . 0)
+      (fileName . ""))))
+
+(defun claude-code-mcp-handle-getOpenEditors (_params)
+  "Handle getOpenEditors request.
+Returns list of all open editor tabs with URIs and dirty status."
+  (let ((editors '())
+        (project-root (claude-code-normalize-project-root (projectile-project-root))))
+    (dolist (buffer (buffer-list))
+      (let ((file-path (buffer-file-name buffer)))
+        (when (and file-path
+                   (string-prefix-p project-root file-path))
+          (push `((uri . ,file-path)
+                  (label . ,(file-name-nondirectory file-path))
+                  (isDirty . ,(if (buffer-modified-p buffer) t json-false)))
+                editors))))
+    `((editors . ,(nreverse editors)))))
+
+(defun claude-code-mcp-handle-getWorkspaceFolders (_params)
+  "Handle getWorkspaceFolders request.
+Returns list of workspace folders."
+  (let ((project-root (claude-code-normalize-project-root (projectile-project-root))))
+    `((folders . (((uri . ,project-root)
+                   (name . ,(file-name-nondirectory (directory-file-name project-root)))))))))
+
+(defun claude-code-mcp-handle-checkDocumentDirty (params)
+  "Handle checkDocumentDirty request with PARAMS.
+Checks if a document has unsaved changes."
+  (let ((path (cdr (assoc 'path params))))
+    (condition-case _err
+        (progn
+          (unless path
+            (error "Path is required"))
+          (let* ((full-path (expand-file-name path))
+                 (buffer (find-buffer-visiting full-path)))
+            (if buffer
+                `((dirty . ,(if (buffer-modified-p buffer) t json-false))
+                  (path . ,path))
+              `((dirty . ,json-false)
+                (path . ,path)))))
+      (error
+       `((dirty . ,json-false)
+         (path . ,path))))))
+
+(defun claude-code-mcp-handle-saveDocument (params)
+  "Handle saveDocument request with PARAMS.
+Saves a document to disk."
+  (let ((path (cdr (assoc 'path params))))
+    (condition-case err
+        (progn
+          (unless path
+            (error "Path is required"))
+          (let* ((full-path (expand-file-name path))
+                 (buffer (find-buffer-visiting full-path)))
+            (if buffer
+                (progn
+                  (with-current-buffer buffer
+                    (save-buffer))
+                  `((success . t)
+                    (message . ,(format "Saved file: %s" path))))
+              `((success . ,json-false)
+                (message . ,(format "Buffer not found for file: %s" path))))))
+      (error
+       `((success . ,json-false)
+         (message . ,(error-message-string err)))))))
+
+(defun claude-code-mcp-handle-closeTab (params)
+  "Handle closeTab request with PARAMS.
+Closes an editor tab/buffer."
+  (let ((path (cdr (assoc 'path params))))
+    (condition-case err
+        (progn
+          (unless path
+            (error "Path is required"))
+          (let* ((full-path (expand-file-name path))
+                 (buffer (find-buffer-visiting full-path)))
+            (if buffer
+                (progn
+                  (kill-buffer buffer)
+                  `((success . t)
+                    (message . ,(format "Closed tab: %s" path))))
+              `((success . ,json-false)
+                (message . ,(format "Buffer not found for file: %s" path))))))
+      (error
+       `((success . ,json-false)
+         (message . ,(error-message-string err)))))))
+
+(defun claude-code-mcp-handle-closeAllDiffTabs (_params)
+  "Handle closeAllDiffTabs request.
+Closes all diff/ediff buffers."
+  (let ((closed 0))
+    (condition-case _err
+        (progn
+          (dolist (buffer (buffer-list))
+            (with-current-buffer buffer
+              (when (or (eq major-mode 'ediff-mode)
+                        (eq major-mode 'diff-mode)
+                        (string-prefix-p "*ediff" (buffer-name buffer)))
+                (kill-buffer buffer)
+                (setq closed (1+ closed)))))
+          `((success . t)
+            (closed . ,closed)))
+      (error
+       `((success . ,json-false)
+         (closed . ,closed))))))
 
 (provide 'claude-code-mcp-tools)
 ;;; claude-code-mcp-tools.el ends here
