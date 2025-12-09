@@ -31,7 +31,6 @@
 
 ;;; Code:
 
-(require 'websocket nil t)
 (require 'projectile)
 (require 'json)
 (require 'claude-code-core)

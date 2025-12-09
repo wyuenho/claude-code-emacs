@@ -30,7 +30,6 @@
 
 ;;; Code:
 
-(require 'websocket nil t)
 (require 'json)
 (require 'cl-lib)
 
@@ -198,9 +197,6 @@ PARAMS is the notification parameters."
 (defun claude-code-ide-server-start (project-root)
   "Start IDE WebSocket server for PROJECT-ROOT.
 Returns a cons cell (PORT . AUTH-TOKEN)."
-  (unless (featurep 'websocket)
-    (error "websocket.el is required but not available"))
-
   (let* ((auth-token (claude-code-ide-generate-uuid))
          (server-info (list (cons 'auth-token auth-token)
                            (cons 'project-root project-root)

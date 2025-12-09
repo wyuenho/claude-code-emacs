@@ -30,7 +30,6 @@
 ;;; Code:
 
 (require 'json)
-(require 'websocket nil t)
 (require 'projectile)
 
 ;; Declare websocket functions to avoid eager macro-expansion failures

@@ -139,12 +139,11 @@ With prefix argument, select from available options."
          (default-directory project-root)
 
          ;; Start IDE WebSocket server FIRST (if available)
-         (server-info (when (featurep 'websocket)
-                        (condition-case err
-                            (claude-code-ide-server-start project-root)
-                          (error
-                           (message "Failed to start IDE server: %S" err)
-                           nil))))
+         (server-info (condition-case err
+                          (claude-code-ide-server-start project-root)
+                        (error
+                         (message "Failed to start IDE server: %S" err)
+                         nil)))
          (ide-port (when server-info (car server-info)))
          (auth-token (when server-info (cdr server-info)))
 
@@ -152,8 +151,7 @@ With prefix argument, select from available options."
          (_ (when (and ide-port auth-token)
               (claude-code-ide-create-lock-file ide-port auth-token project-root)
               ;; Enable IDE event notifications
-              (when (fboundp 'claude-code-ide-events-enable)
-                (claude-code-ide-events-enable))))
+              (claude-code-ide-events-enable)))
 
          ;; Set environment variables for IDE integration
          (vterm-environment (if ide-port
@@ -182,9 +180,8 @@ With prefix argument, select from available options."
                                 (concat " " extra-input)))))
 
     ;; Log IDE server status
-    (if ide-port
-        (message "IDE server started on port %d" ide-port)
-      (message "IDE server not started (websocket.el not available)"))
+    (when ide-port
+      (message "IDE server started on port %d" ide-port))
 
     (with-current-buffer buf
       (unless (eq major-mode 'claude-code-vterm-mode)
@@ -223,12 +220,9 @@ With prefix argument, select from available options."
     (if buffer
         (progn
           ;; Stop IDE server if it's running
-          (when (and (featurep 'websocket)
-                     (fboundp 'claude-code-ide-server-stop))
-            ;; Disable IDE event notifications
-            (when (fboundp 'claude-code-ide-events-disable)
-              (claude-code-ide-events-disable))
-            (claude-code-ide-server-stop project-root))
+          ;; Disable IDE event notifications
+          (claude-code-ide-events-disable)
+          (claude-code-ide-server-stop project-root)
 
           ;; First close any windows showing the buffer
           (dolist (window (get-buffer-window-list buffer nil t))
