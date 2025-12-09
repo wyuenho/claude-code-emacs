@@ -30,17 +30,8 @@
 ;;; Code:
 
 (require 'projectile)
-
-;; Forward declarations
-(declare-function claude-code-send-string "claude-code-core" (string &optional paste-p))
-(declare-function claude-code-ensure-buffer "claude-code-core" ())
-(declare-function claude-code-with-vterm-buffer "claude-code-core" (body-fn))
-(declare-function claude-code-normalize-project-root "claude-code-core" (root))
-
-;; vterm function declarations (vterm is loaded by core)
-(declare-function vterm-send-escape "vterm" ())
-(declare-function vterm-send-return "vterm" ())
-(declare-function vterm-send-key "vterm" (key &optional shift))
+(require 'claude-code-core)
+(require 'vterm)
 
 ;; LSP function declarations (optional dependency)
 (declare-function lsp-diagnostics "lsp-mode" (&optional all-workspaces))

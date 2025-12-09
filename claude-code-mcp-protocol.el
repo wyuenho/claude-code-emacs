@@ -31,41 +31,14 @@
 
 (require 'json)
 (require 'projectile)
-
-;; Declare websocket functions to avoid eager macro-expansion failures
-(declare-function websocket-send-text "websocket" (websocket text))
-(declare-function websocket-frame-text "websocket" (frame))
+(require 'websocket)
+(require 'claude-code-mcp-tools)
 
 ;; Forward declarations
 (declare-function claude-code-mcp-get-connection-info "claude-code-mcp-connection" (project-root))
 (declare-function claude-code-mcp-get-websocket "claude-code-mcp-connection" (project-root))
 (declare-function claude-code-mcp-set-websocket "claude-code-mcp-connection" (websocket project-root))
 (declare-function claude-code-mcp-handle-pong "claude-code-mcp-connection" (project-root))
-
-;; Tool handler forward declarations
-(declare-function claude-code-mcp-handle-getOpenBuffers "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getCurrentSelection "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getDiagnostics "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-get-buffer-content "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-get-project-info "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-get-project-files "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getDefinition "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-findReferences "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-describeSymbol "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-openDiffFile "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-openRevisionDiff "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-openCurrentChanges "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-openDiffContent "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-sendNotification "claude-code-mcp-tools" (params))
-;; IDE Protocol tool handlers
-(declare-function claude-code-mcp-handle-openFile "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getLatestSelection "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getOpenEditors "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-getWorkspaceFolders "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-checkDocumentDirty "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-saveDocument "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-closeTab "claude-code-mcp-tools" (params))
-(declare-function claude-code-mcp-handle-closeAllDiffTabs "claude-code-mcp-tools" (params))
 
 ;;; JSON-RPC Communication
 

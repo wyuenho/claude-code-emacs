@@ -32,8 +32,7 @@
 (require 'transient)
 (require 'projectile)
 (require 'markdown-mode)
-
-(declare-function vterm-mode "vterm" ())
+(require 'vterm)
 
 ;; Forward declarations
 (declare-function claude-code-run "claude-code-core" ())

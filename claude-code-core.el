@@ -30,14 +30,7 @@
 
 (require 'projectile)
 (require 'json)
-
-;; vterm variables
-(defvar vterm-timer-delay)
-(defvar vterm-shell)
-(defvar vterm-environment)
-
-(declare-function vterm-send-return "vterm" ())
-(declare-function vterm-send-string "vterm" (string &optional paste-p))
+(require 'vterm)
 
 ;; Forward declarations for MCP integration
 (declare-function claude-code-mcp-disconnect "claude-code-mcp-connection" (project-root))

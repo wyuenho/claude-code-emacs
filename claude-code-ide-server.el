@@ -32,16 +32,8 @@
 
 (require 'json)
 (require 'cl-lib)
-
-;; Declare websocket functions
-(declare-function websocket-server "websocket" (port &rest plist))
-(declare-function websocket-send-text "websocket" (websocket text))
-(declare-function websocket-close "websocket" (websocket))
-(declare-function websocket-verify-client-headers "websocket" (output))
-(declare-function websocket-frame-text "websocket" (frame))
-
-;; Forward declarations for tool handlers
-(declare-function claude-code-ide-tools-dispatch "claude-code-ide-tools" (method params))
+(require 'websocket)
+(require 'claude-code-ide-tools)
 
 ;;; Variables
 
@@ -55,21 +47,6 @@ Each value is an alist with keys:
   - project-root: Project root directory")
 
 ;;; Helper Functions
-
-;; Additional websocket function declarations
-(declare-function websocket-server-accept "websocket" (server client message))
-(declare-function websocket-ready-state "websocket" (websocket))
-(declare-function websocket-inflight-input "websocket" (websocket))
-(declare-function websocket-verify-client-headers "websocket" (output))
-(declare-function websocket-calculate-accept "websocket" (key))
-(declare-function websocket-get-server-response "websocket" (websocket protocols extensions))
-(declare-function websocket-process-input-on-open-ws "websocket" (websocket text))
-(declare-function websocket-try-callback "websocket" (websocket-callback callback-type websocket &rest rest))
-(declare-function websocket-accept-string "websocket" (websocket))
-(declare-function websocket-origin "websocket" (websocket))
-(declare-function websocket-server-conn "websocket" (websocket))
-
-(defvar websocket-server-websockets)
 
 (defun claude-code-ide-server-filter (process output)
   "Custom filter for IDE WebSocket server that validates auth token.

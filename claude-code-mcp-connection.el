@@ -34,12 +34,7 @@
 (require 'projectile)
 (require 'json)
 (require 'claude-code-core)
-
-;; Declare websocket functions to avoid eager macro-expansion failures
-(declare-function websocket-open "websocket" (url &rest args))
-(declare-function websocket-send-text "websocket" (websocket text))
-(declare-function websocket-close "websocket" (websocket))
-(declare-function websocket-openp "websocket" (websocket))
+(require 'websocket)
 
 ;; Forward declarations
 (declare-function claude-code-mcp-on-message "claude-code-mcp-protocol" (_websocket frame project-root))
