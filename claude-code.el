@@ -68,16 +68,20 @@
 (require 'vterm)
 
 ;; Load all modules
+;; Load websocket first (needed by MCP and IDE modules)
 (require 'websocket)
+;; Load MCP modules (claude-code-core uses claude-code-mcp-disconnect)
+(require 'claude-code-mcp)
+(require 'claude-code-mcp-events)
+;; Load IDE modules (claude-code-core uses claude-code-ide-server-start/stop)
+(require 'claude-code-ide-server)
+(require 'claude-code-ide-tools)
+(require 'claude-code-ide-events)
+;; Load core and UI modules
 (require 'claude-code-core)
 (require 'claude-code-commands)
 (require 'claude-code-ui)
 (require 'claude-code-prompt)
-(require 'claude-code-mcp)
-(require 'claude-code-mcp-events)
-(require 'claude-code-ide-server)
-(require 'claude-code-ide-tools)
-(require 'claude-code-ide-events)
 
 (provide 'claude-code)
 ;;; claude-code.el ends here

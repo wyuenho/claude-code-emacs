@@ -33,6 +33,7 @@
 (require 'projectile)
 (require 'markdown-mode)
 (require 'vterm)
+(require 'claude-code-ide-events)
 
 ;; Forward declarations
 (declare-function claude-code-run "claude-code-core" ())
@@ -81,6 +82,9 @@
 (declare-function claude-code-insert-region-path-to-prompt "claude-code-prompt" ())
 (declare-function claude-code-insert-current-file-path-to-prompt "claude-code-prompt" ())
 (declare-function claude-code-insert-current-file-path-to-session "claude-code-prompt" ())
+
+;; IDE events forward declarations
+(declare-function claude-code-ide-send-at-mention "claude-code-ide-events" ())
 
 ;;;;; Vterm terminal customizations
 (defcustom claude-code-vterm-buffer-multiline-output t

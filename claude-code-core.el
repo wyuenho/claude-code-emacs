@@ -39,6 +39,8 @@
 ;; Forward declarations for IDE integration
 (declare-function claude-code-ide-server-start "claude-code-ide-server" (project-root))
 (declare-function claude-code-ide-server-stop "claude-code-ide-server" (project-root))
+(declare-function claude-code-ide-events-enable "claude-code-ide-events" ())
+(declare-function claude-code-ide-events-disable "claude-code-ide-events" ())
 
 ;;; Customization
 

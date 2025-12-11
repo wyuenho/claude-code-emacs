@@ -35,6 +35,9 @@
 (require 'websocket)
 (require 'claude-code-ide-tools)
 
+;; Forward declaration for lock file management
+(declare-function claude-code-ide-remove-lock-file "claude-code-core" (port))
+
 ;;; Variables
 
 (defvar claude-code-ide-servers (make-hash-table :test 'equal)
