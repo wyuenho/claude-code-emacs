@@ -31,46 +31,14 @@
 (require 'projectile)
 (require 'json)
 (require 'vterm)
+(require 'claude-code-base)
+(require 'claude-code-ide-server)
+(require 'claude-code-ide-events)
 
-;; Forward declarations for MCP integration
-(declare-function claude-code-mcp-disconnect "claude-code-mcp-connection" (project-root))
+;; Forward declaration for UI (loaded after core by claude-code.el)
 (declare-function claude-code-vterm-mode "claude-code-ui" ())
 
-;; Forward declarations for IDE integration
-(declare-function claude-code-ide-server-start "claude-code-ide-server" (project-root))
-(declare-function claude-code-ide-server-stop "claude-code-ide-server" (project-root))
-(declare-function claude-code-ide-events-enable "claude-code-ide-events" ())
-(declare-function claude-code-ide-events-disable "claude-code-ide-events" ())
-
-;;; Customization
-
-(defgroup claude-code nil
-  "Run Claude Code within Emacs."
-  :group 'tools
-  :prefix "claude-code-")
-
-
-(defcustom claude-code-executable "claude"
-  "The executable name or path for Claude Code CLI."
-  :type 'string
-  :group 'claude-code)
-
-(defconst claude-code-available-options
-  '(("--verbose" . "Enable detailed logging")
-    ("--model sonnet" . "Use Claude Sonnet model")
-    ("--model opus" . "Use Claude Opus model")
-    ("--resume" . "Resume specific session by ID")
-    ("--continue" . "Load latest conversation in current directory")
-    ("--dangerously-skip-permissions" . "Skip permission prompts"))
-  "Available options for Claude Code CLI.")
-
 ;;; Buffer Management
-
-(defun claude-code-normalize-project-root (project-root)
-  "Normalize PROJECT-ROOT by removing trailing slash.
-Return nil if PROJECT-ROOT is nil."
-  (when project-root
-    (directory-file-name project-root)))
 
 (defun claude-code-buffer-name ()
   "Return the buffer name for Claude Code session in current project.
@@ -92,35 +60,6 @@ Return nil if not in a project."
   (let ((buf (claude-code-ensure-buffer)))
     (with-current-buffer buf
       (funcall body-fn))))
-
-;;; IDE Lock File Management
-
-(defun claude-code-ide-create-lock-file (port auth-token project-root)
-  "Create ~/.claude/ide/<port>.lock with authentication token.
-PORT is the WebSocket server port.
-AUTH-TOKEN is the UUID for authentication.
-PROJECT-ROOT is the project workspace folder."
-  (let* ((ide-dir (expand-file-name "~/.claude/ide"))
-         (lock-file (expand-file-name (format "%d.lock" port) ide-dir))
-         (lock-data `((pid . ,(emacs-pid))
-                      (workspaceFolders . (,project-root))
-                      (ideName . "Emacs")
-                      (transport . "ws")
-                      (authToken . ,auth-token))))
-    ;; Ensure ~/.claude/ide directory exists with secure permissions (700)
-    (unless (file-exists-p ide-dir)
-      (make-directory ide-dir t)
-      (set-file-modes ide-dir #o700))
-    ;; Write lock file directly to avoid with-temp-file issues in tests
-    (write-region (json-encode lock-data) nil lock-file nil 'silent)
-    (set-file-modes lock-file #o600)
-    lock-file))
-
-(defun claude-code-ide-remove-lock-file (port)
-  "Remove IDE lock file for PORT if it exists."
-  (let ((lock-file (expand-file-name (format "~/.claude/ide/%d.lock" port))))
-    (when (file-exists-p lock-file)
-      (delete-file lock-file))))
 
 ;;; Session Management
 

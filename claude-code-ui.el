@@ -33,6 +33,7 @@
 (require 'projectile)
 (require 'markdown-mode)
 (require 'vterm)
+(require 'claude-code-base)
 (require 'claude-code-ide-events)
 
 ;; Forward declarations
@@ -43,7 +44,6 @@
 (declare-function claude-code-send-region "claude-code-core" ())
 (declare-function claude-code-send-string "claude-code-core" (string &optional paste-p))
 (declare-function claude-code-buffer-name "claude-code-core" ())
-(declare-function claude-code-normalize-project-root "claude-code-core" (project-root))
 
 ;; Command forward declarations
 (declare-function claude-code-send-1 "claude-code-commands" ())

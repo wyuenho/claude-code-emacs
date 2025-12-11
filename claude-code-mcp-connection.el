@@ -33,7 +33,7 @@
 
 (require 'projectile)
 (require 'json)
-(require 'claude-code-core)
+(require 'claude-code-base)
 (require 'websocket)
 
 ;; Forward declarations

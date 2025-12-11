@@ -68,12 +68,14 @@
 (require 'vterm)
 
 ;; Load all modules
-;; Load websocket first (needed by MCP and IDE modules)
+;; Load base first (shared utilities with no deps on other claude-code modules)
+(require 'claude-code-base)
+;; Load websocket (needed by MCP and IDE modules)
 (require 'websocket)
-;; Load MCP modules (claude-code-core uses claude-code-mcp-disconnect)
+;; Load MCP modules
 (require 'claude-code-mcp)
 (require 'claude-code-mcp-events)
-;; Load IDE modules (claude-code-core uses claude-code-ide-server-start/stop)
+;; Load IDE modules
 (require 'claude-code-ide-server)
 (require 'claude-code-ide-tools)
 (require 'claude-code-ide-events)

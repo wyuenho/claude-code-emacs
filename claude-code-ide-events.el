@@ -27,11 +27,9 @@
 
 ;;; Code:
 
-(require 'claude-code-core)
+(require 'claude-code-base)
+(require 'claude-code-ide-server)
 (require 'projectile)
-
-;; Forward declaration
-(declare-function claude-code-ide-send-notification "claude-code-ide-server" (project-root method params))
 
 ;;; Variables
 

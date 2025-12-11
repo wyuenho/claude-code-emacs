@@ -29,7 +29,7 @@
 
 ;;; Code:
 
-(require 'claude-code-core)
+(require 'claude-code-base)
 (require 'claude-code-mcp-connection)
 (require 'projectile)
 (require 'lsp-mode nil t)

@@ -33,10 +33,37 @@
 (require 'json)
 (require 'cl-lib)
 (require 'websocket)
+(require 'claude-code-base)
 (require 'claude-code-ide-tools)
 
-;; Forward declaration for lock file management
-(declare-function claude-code-ide-remove-lock-file "claude-code-core" (port))
+;;; IDE Lock File Management
+
+(defun claude-code-ide-create-lock-file (port auth-token project-root)
+  "Create ~/.claude/ide/<port>.lock with authentication token.
+PORT is the WebSocket server port.
+AUTH-TOKEN is the UUID for authentication.
+PROJECT-ROOT is the project workspace folder."
+  (let* ((ide-dir (expand-file-name "~/.claude/ide"))
+         (lock-file (expand-file-name (format "%d.lock" port) ide-dir))
+         (lock-data `((pid . ,(emacs-pid))
+                      (workspaceFolders . (,project-root))
+                      (ideName . "Emacs")
+                      (transport . "ws")
+                      (authToken . ,auth-token))))
+    ;; Ensure ~/.claude/ide directory exists with secure permissions (700)
+    (unless (file-exists-p ide-dir)
+      (make-directory ide-dir t)
+      (set-file-modes ide-dir #o700))
+    ;; Write lock file directly to avoid with-temp-file issues in tests
+    (write-region (json-encode lock-data) nil lock-file nil 'silent)
+    (set-file-modes lock-file #o600)
+    lock-file))
+
+(defun claude-code-ide-remove-lock-file (port)
+  "Remove IDE lock file for PORT if it exists."
+  (let ((lock-file (expand-file-name (format "~/.claude/ide/%d.lock" port))))
+    (when (file-exists-p lock-file)
+      (delete-file lock-file))))
 
 ;;; Variables
 
